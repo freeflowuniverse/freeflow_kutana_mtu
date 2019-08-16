@@ -1,0 +1,19 @@
+version: '3'
+
+services:
+  janus_gateway:
+    network_mode: host
+    container_name: ffc_janus_gateway
+    image: jimber/ffc_janus_gateway:latest
+    build:
+      context: ./
+      dockerfile: ./Dockerfile
+    # volumes:
+    #   - /opt/ffc/janus-gateway/certs:/opt/janus/share/janus/certs
+    ports:
+      - "7088:7088"
+      - "7889:7889"
+      - "8088:8088"
+      - "8089:8089"
+      - "8188:8989"
+      - "10000-10200:10000-10200/udp"
