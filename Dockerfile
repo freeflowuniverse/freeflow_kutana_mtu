@@ -28,7 +28,12 @@ RUN apt-get update -y \
     graphviz \
     cmake \
     wget \
-    nginx
+    nginx \
+    curl
+
+RUN curl -sL https://deb.nodesource.com/setup_11.x | sudo -E bash -
+
+RUN apt install -y nodejs
 
 RUN cd / \
     && wget https://github.com/cisco/libsrtp/archive/v2.1.0.tar.gz \
@@ -66,7 +71,7 @@ COPY ./freeflowconnect_gateway /janus-gateway/
 COPY ./freeflowconnect_gateway/.git/ /.git
 WORKDIR /janus-gateway/
 RUN ./autogen.sh
-RUN ./configure --prefix=/opt/janus --disable-unix-sockets --disable-rabbitmq --disable-mqtt --disable-plugin-audiobridge --disable-data-channels --disable-plugin-echotest --disable-plugin-recordplay --disable-plugin-sip --disable-plugin-sipre --disable-plugin-nosip --disable-plugin-textroom --disable-plugin-videocall --disable-plugin-videoroom --disable-plugin-voicemail
+RUN ./configure --prefix=/opt/janus --enable-javascript-es-module --disable-unix-sockets --disable-rabbitmq --disable-mqtt --disable-plugin-audiobridge --disable-data-channels --disable-plugin-echotest --disable-plugin-recordplay --disable-plugin-sip --disable-plugin-sipre --disable-plugin-nosip --disable-plugin-textroom --disable-plugin-videocall --disable-plugin-voicemail
 RUN make CFLAGS='-std=c99'
 RUN make install
 
