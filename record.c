@@ -70,7 +70,8 @@ static void janus_recorder_free(const janus_refcount *recorder_ref) {
 	recorder->dir = NULL;
 	g_free(recorder->filename);
 	recorder->filename = NULL;
-	fclose(recorder->file);
+	if(recorder->file != NULL)
+		fclose(recorder->file);
 	recorder->file = NULL;
 	g_free(recorder->codec);
 	recorder->codec = NULL;
@@ -99,6 +100,7 @@ janus_recorder *janus_recorder_create(const char *dir, const char *codec, const 
 	}
 	/* Create the recorder */
 	janus_recorder *rc = g_malloc0(sizeof(janus_recorder));
+	janus_refcount_init(&rc->ref, janus_recorder_free);
 	rc->dir = NULL;
 	rc->filename = NULL;
 	rc->file = NULL;
@@ -109,7 +111,7 @@ janus_recorder *janus_recorder_create(const char *dir, const char *codec, const 
 	char *copy_for_parent = NULL;
 	char *copy_for_base = NULL;
 	/* Check dir and filename values */
-	if (filename != NULL) {
+	if(filename != NULL) {
 		/* Helper copies to avoid overwriting */
 		copy_for_parent = g_strdup(filename);
 		copy_for_base = g_strdup(filename);
@@ -117,7 +119,7 @@ janus_recorder *janus_recorder_create(const char *dir, const char *codec, const 
 		const char *filename_parent = dirname(copy_for_parent);
 		/* Get filename base file */
 		const char *filename_base = basename(copy_for_base);
-		if (!dir) {
+		if(!dir) {
 			/* If dir is NULL we have to create filename_parent and filename_base */
 			rec_dir = filename_parent;
 			rec_file = filename_base;
@@ -125,7 +127,7 @@ janus_recorder *janus_recorder_create(const char *dir, const char *codec, const 
 			/* If dir is valid we have to create dir and filename*/
 			rec_dir = dir;
 			rec_file = filename;
-			if (strcasecmp(filename_parent, ".") || strcasecmp(filename_base, filename)) {
+			if(strcasecmp(filename_parent, ".") || strcasecmp(filename_base, filename)) {
 				JANUS_LOG(LOG_WARN, "Unsupported combination of dir and filename %s %s\n", dir, filename);
 			}
 		}
@@ -138,11 +140,17 @@ janus_recorder *janus_recorder_create(const char *dir, const char *codec, const 
 			if(ENOENT == errno) {
 				/* Directory does not exist, try creating it */
 				if(janus_mkdir(rec_dir, 0755) < 0) {
-					JANUS_LOG(LOG_ERR, "mkdir error: %d\n", errno);
+					JANUS_LOG(LOG_ERR, "mkdir (%s) error: %d (%s)\n", rec_dir, errno, strerror(errno));
+					janus_recorder_destroy(rc);
+					g_free(copy_for_parent);
+					g_free(copy_for_base);
 					return NULL;
 				}
 			} else {
-				JANUS_LOG(LOG_ERR, "stat error: %d\n", errno);
+				JANUS_LOG(LOG_ERR, "stat (%s) error: %d (%s)\n", rec_dir, errno, strerror(errno));
+				janus_recorder_destroy(rc);
+				g_free(copy_for_parent);
+				g_free(copy_for_base);
 				return NULL;
 			}
 		} else {
@@ -152,6 +160,9 @@ janus_recorder *janus_recorder_create(const char *dir, const char *codec, const 
 			} else {
 				/* File exists but it's not a directory? */
 				JANUS_LOG(LOG_ERR, "Not a directory? %s\n", rec_dir);
+				janus_recorder_destroy(rc);
+				g_free(copy_for_parent);
+				g_free(copy_for_base);
 				return NULL;
 			}
 		}
@@ -179,15 +190,34 @@ janus_recorder *janus_recorder_create(const char *dir, const char *codec, const 
 	}
 	/* Try opening the file now */
 	if(rec_dir == NULL) {
+		/* Make sure folder to save to is not protected */
+		if(janus_is_folder_protected(newname)) {
+			JANUS_LOG(LOG_ERR, "Target recording path '%s' is in protected folder...\n", newname);
+			janus_recorder_destroy(rc);
+			g_free(copy_for_parent);
+			g_free(copy_for_base);
+			return NULL;
+		}
 		rc->file = fopen(newname, "wb");
 	} else {
 		char path[1024];
 		memset(path, 0, 1024);
 		g_snprintf(path, 1024, "%s/%s", rec_dir, newname);
+		/* Make sure folder to save to is not protected */
+		if(janus_is_folder_protected(path)) {
+			JANUS_LOG(LOG_ERR, "Target recording path '%s' is in protected folder...\n", path);
+			janus_recorder_destroy(rc);
+			g_free(copy_for_parent);
+			g_free(copy_for_base);
+			return NULL;
+		}
 		rc->file = fopen(path, "wb");
 	}
 	if(rc->file == NULL) {
 		JANUS_LOG(LOG_ERR, "fopen error: %d\n", errno);
+		janus_recorder_destroy(rc);
+		g_free(copy_for_parent);
+		g_free(copy_for_base);
 		return NULL;
 	}
 	if(rec_dir)
@@ -195,14 +225,21 @@ janus_recorder *janus_recorder_create(const char *dir, const char *codec, const 
 	rc->filename = g_strdup(newname);
 	rc->type = type;
 	/* Write the first part of the header */
-	fwrite(header, sizeof(char), strlen(header), rc->file);
+	size_t res = fwrite(header, sizeof(char), strlen(header), rc->file);
+	if(res != strlen(header)) {
+		JANUS_LOG(LOG_ERR, "Couldn't write .mjr header (%zu != %zu, %s)\n",
+			res, strlen(header), strerror(errno));
+		janus_recorder_destroy(rc);
+		g_free(copy_for_parent);
+		g_free(copy_for_base);
+		return NULL;
+	}
 	g_atomic_int_set(&rc->writable, 1);
 	/* We still need to also write the info header first */
 	g_atomic_int_set(&rc->header, 0);
 	janus_mutex_init(&rc->mutex);
 	/* Done */
 	g_atomic_int_set(&rc->destroyed, 0);
-	janus_refcount_init(&rc->ref, janus_recorder_free);
 	g_free(copy_for_parent);
 	g_free(copy_for_base);
 	return rc;
@@ -243,24 +280,48 @@ int janus_recorder_save_frame(janus_recorder *recorder, char *buffer, uint lengt
 		gchar *info_text = json_dumps(info, JSON_PRESERVE_ORDER);
 		json_decref(info);
 		uint16_t info_bytes = htons(strlen(info_text));
-		fwrite(&info_bytes, sizeof(uint16_t), 1, recorder->file);
-		fwrite(info_text, sizeof(char), strlen(info_text), recorder->file);
+		size_t res = fwrite(&info_bytes, sizeof(uint16_t), 1, recorder->file);
+		if(res != 1) {
+			JANUS_LOG(LOG_WARN, "Couldn't write size of JSON header in .mjr file (%zu != %zu, %s), expect issues post-processing\n",
+				res, sizeof(uint16_t), strerror(errno));
+		}
+		res = fwrite(info_text, sizeof(char), strlen(info_text), recorder->file);
+		if(res != strlen(info_text)) {
+			JANUS_LOG(LOG_WARN, "Couldn't write JSON header in .mjr file (%zu != %zu, %s), expect issues post-processing\n",
+				res, strlen(info_text), strerror(errno));
+		}
 		free(info_text);
 		/* Done */
 		recorder->started = now;
 		g_atomic_int_set(&recorder->header, 1);
 	}
 	/* Write frame header (fixed part[4], timestamp[4], length[2]) */
-	fwrite(frame_header, sizeof(char), strlen(frame_header), recorder->file);
+	size_t res = fwrite(frame_header, sizeof(char), strlen(frame_header), recorder->file);
+	if(res != strlen(frame_header)) {
+		JANUS_LOG(LOG_WARN, "Couldn't write frame header in .mjr file (%zu != %zu, %s), expect issues post-processing\n",
+			res, strlen(frame_header), strerror(errno));
+	}
 	uint32_t timestamp = (uint32_t)(now > recorder->started ? ((now - recorder->started)/1000) : 0);
 	timestamp = htonl(timestamp);
-	fwrite(&timestamp, sizeof(uint32_t), 1, recorder->file);
+	res = fwrite(&timestamp, sizeof(uint32_t), 1, recorder->file);
+	if(res != 1) {
+		JANUS_LOG(LOG_WARN, "Couldn't write frame timestamp in .mjr file (%zu != %zu, %s), expect issues post-processing\n",
+			res, sizeof(uint32_t), strerror(errno));
+	}
 	uint16_t header_bytes = htons(recorder->type == JANUS_RECORDER_DATA ? (length+sizeof(gint64)) : length);
-	fwrite(&header_bytes, sizeof(uint16_t), 1, recorder->file);
+	res = fwrite(&header_bytes, sizeof(uint16_t), 1, recorder->file);
+	if(res != 1) {
+		JANUS_LOG(LOG_WARN, "Couldn't write size of frame in .mjr file (%zu != %zu, %s), expect issues post-processing\n",
+			res, sizeof(uint16_t), strerror(errno));
+	}
 	if(recorder->type == JANUS_RECORDER_DATA) {
 		/* If it's data, then we need to prepend timing related info, as it's not there by itself */
 		gint64 now = htonll(janus_get_real_time());
-		fwrite(&now, sizeof(gint64), 1, recorder->file);
+		res = fwrite(&now, sizeof(gint64), 1, recorder->file);
+		if(res != 1) {
+			JANUS_LOG(LOG_WARN, "Couldn't write data timestamp in .mjr file (%zu != %zu, %s), expect issues post-processing\n",
+				res, sizeof(gint64), strerror(errno));
+		}
 	}
 	/* Save packet on file */
 	int temp = 0, tot = length;

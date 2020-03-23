@@ -72,7 +72,7 @@ $(document).ready(function() {
 				{
 					server: server,
 					success: function() {
-						// Attach to nosip plugin as a caller
+						// Attach to NoSIP plugin as a caller
 						janus.attach(
 							{
 								plugin: "janus.plugin.nosip",
@@ -251,8 +251,6 @@ $(document).ready(function() {
 										$('.dtmf').click(function() {
 											// Send DTMF tone (inband)
 											caller.dtmf({dtmf: { tones: $(this).text()}});
-											// Notice you can also send DTMF tones using SIP INFO
-											// 		caller.send({message: {request: "dtmf_info", digit: $(this).text()}});
 										});
 										// Show the peer and hide the spinner when we get a playing event
 										$("#peervideo").bind("playing", function () {
@@ -292,7 +290,7 @@ $(document).ready(function() {
 									$('#peervideo').remove();
 								}
 							});
-						// Attach to nosip plugin as a callee
+						// Attach to NoSIP plugin as a callee
 						janus.attach(
 							{
 								plugin: "janus.plugin.nosip",

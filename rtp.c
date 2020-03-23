@@ -174,14 +174,16 @@ static int janus_rtp_header_extension_find(char *buf, int len, int id,
 	return -1;
 }
 
-int janus_rtp_header_extension_parse_audio_level(char *buf, int len, int id, int *level) {
+int janus_rtp_header_extension_parse_audio_level(char *buf, int len, int id, gboolean *vad, int *level) {
 	uint8_t byte = 0;
 	if(janus_rtp_header_extension_find(buf, len, id, &byte, NULL, NULL) < 0)
 		return -1;
 	/* a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level */
-	int v = (byte & 0x80) >> 7;
+	gboolean v = (byte & 0x80) >> 7;
 	int value = byte & 0x7F;
 	JANUS_LOG(LOG_DBG, "%02x --> v=%d, level=%d\n", byte, v, value);
+	if(vad)
+		*vad = v;
 	if(level)
 		*level = value;
 	return 0;
@@ -301,11 +303,24 @@ int janus_rtp_header_extension_parse_transport_wide_cc(char *buf, int len, int i
 	if(ext == NULL)
 		return -2;
 	int val_len = (*ext & 0x0F) + 1;
-	if (val_len < 2 || val_len > len-(ext-buf)-1) {
+	if (val_len < 2 || val_len > len-(ext-buf)-1)
 		return -3;
-	}
 	memcpy(transSeqNum, ext+1, sizeof(uint16_t));
 	*transSeqNum = ntohs(*transSeqNum);
+	return 0;
+}
+
+int janus_rtp_header_extension_set_transport_wide_cc(char *buf, int len, int id, uint16_t transSeqNum) {
+	char *ext = NULL;
+	if(janus_rtp_header_extension_find(buf, len, id, NULL, NULL, &ext) < 0)
+		return -1;
+	if(ext == NULL)
+		return -2;
+	int val_len = (*ext & 0x0F) + 1;
+	if (val_len < 2 || val_len > len-(ext-buf)-1)
+		return -3;
+	transSeqNum = htons(transSeqNum);
+	memcpy(ext+1, &transSeqNum, sizeof(uint16_t));
 	return 0;
 }
 
@@ -990,13 +1005,13 @@ gboolean janus_rtp_simulcasting_context_process_rtp(janus_rtp_simulcasting_conte
 			if(substream < 0)
 				substream = 0;
 			if(context->substream != substream) {
-				JANUS_LOG(LOG_WARN, "No packet received on substream %d for a while, falling back to %d\n",
-					context->substream, substream);
-				context->substream = substream;
-				/* Notify the caller that we need a PLI */
+				if(context->substream_target != substream) {
+					JANUS_LOG(LOG_WARN, "No packet received on substream %d for a while, falling back to %d\n",
+						context->substream, substream);
+					context->substream_target = substream;
+				}
+				/* Notify the caller that we (still) need a PLI */
 				context->need_pli = TRUE;
-				/* Notify the caller that the substream changed as well */
-				context->changed_substream = TRUE;
 			}
 		}
 	}

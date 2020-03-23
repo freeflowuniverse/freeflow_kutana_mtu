@@ -194,8 +194,8 @@ const char *janus_nosip_get_package(void);
 void janus_nosip_create_session(janus_plugin_session *handle, int *error);
 struct janus_plugin_result *janus_nosip_handle_message(janus_plugin_session *handle, char *transaction, json_t *message, json_t *jsep);
 void janus_nosip_setup_media(janus_plugin_session *handle);
-void janus_nosip_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
-void janus_nosip_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
+void janus_nosip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *packet);
+void janus_nosip_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *packet);
 void janus_nosip_hangup_media(janus_plugin_session *handle);
 void janus_nosip_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_nosip_query_session(janus_plugin_session *handle);
@@ -335,6 +335,8 @@ static GHashTable *sessions;
 static janus_mutex sessions_mutex = JANUS_MUTEX_INITIALIZER;
 
 static void janus_nosip_srtp_cleanup(janus_nosip_session *session);
+
+static void janus_nosip_media_reset(janus_nosip_session *session);
 
 static void janus_nosip_session_destroy(janus_nosip_session *session) {
 	if(session && g_atomic_int_compare_and_exchange(&session->destroyed, 0, 1))
@@ -582,6 +584,27 @@ static void janus_nosip_srtp_cleanup(janus_nosip_session *session) {
 	session->media.video_remote_policy.key = NULL;
 }
 
+void janus_nosip_media_reset(janus_nosip_session *session) {
+	if(session == NULL)
+		return;
+	g_free(session->media.remote_audio_ip);
+	session->media.remote_audio_ip = NULL;
+	g_free(session->media.remote_video_ip);
+	session->media.remote_video_ip = NULL;
+	session->media.updated = FALSE;
+	session->media.ready = FALSE;
+	session->media.require_srtp = FALSE;
+	session->media.has_audio = 0;
+	session->media.audio_pt = -1;
+	session->media.audio_pt_name = NULL;	/* Immutable string, no need to free*/
+	session->media.audio_send = TRUE;
+	session->media.has_video = 0;
+	session->media.video_pt = -1;
+	session->media.video_pt_name = NULL;	/* Immutable string, no need to free*/
+	session->media.video_send = TRUE;
+	janus_rtp_switching_context_reset(&session->media.context);
+}
+
 
 /* SDP parsing and manipulation */
 void janus_nosip_sdp_process(janus_nosip_session *session, janus_sdp *sdp, gboolean answer, gboolean update, gboolean *changed);
@@ -668,8 +691,10 @@ int janus_nosip_init(janus_callbacks *callback, const char *config_path) {
 			if(maxport != NULL) {
 				*maxport = '\0';
 				maxport++;
-				rtp_range_min = atoi(item->value);
-				rtp_range_max = atoi(maxport);
+				if(janus_string_to_uint16(item->value, &rtp_range_min) < 0)
+					JANUS_LOG(LOG_WARN, "Invalid RTP min port value: %s (assuming 0)\n", item->value);
+				if(janus_string_to_uint16(maxport, &rtp_range_max) < 0)
+					JANUS_LOG(LOG_WARN, "Invalid RTP max port value: %s (assuming 0)\n", maxport);
 				maxport--;
 				*maxport = '-';
 			}
@@ -844,6 +869,10 @@ void janus_nosip_create_session(janus_plugin_session *handle, int *error) {
 	session->media.pipefd[0] = -1;
 	session->media.pipefd[1] = -1;
 	session->media.updated = FALSE;
+	session->media.audio_remote_policy.ssrc.type = ssrc_any_inbound;
+	session->media.audio_local_policy.ssrc.type = ssrc_any_inbound;
+	session->media.video_remote_policy.ssrc.type = ssrc_any_inbound;
+	session->media.video_local_policy.ssrc.type = ssrc_any_inbound;
 	janus_mutex_init(&session->rec_mutex);
 	g_atomic_int_set(&session->destroyed, 0);
 	g_atomic_int_set(&session->hangingup, 0);
@@ -961,7 +990,7 @@ void janus_nosip_setup_media(janus_plugin_session *handle) {
 	janus_mutex_unlock(&sessions_mutex);
 }
 
-void janus_nosip_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
+void janus_nosip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *packet) {
 	if(handle == NULL || handle->stopped || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
 	if(gateway) {
@@ -971,6 +1000,9 @@ void janus_nosip_incoming_rtp(janus_plugin_session *handle, int video, char *buf
 			JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 			return;
 		}
+		gboolean video = packet->video;
+		char *buf = packet->buffer;
+		uint16_t len = packet->length;
 		/* Forward to our NoSIP peer */
 		if((video && !session->media.video_send) || (!video && !session->media.audio_send)) {
 			/* Dropping packet, peer doesn't want to receive it */
@@ -1038,7 +1070,7 @@ void janus_nosip_incoming_rtp(janus_plugin_session *handle, int video, char *buf
 	}
 }
 
-void janus_nosip_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len) {
+void janus_nosip_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *packet) {
 	if(handle == NULL || handle->stopped || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
 	if(gateway) {
@@ -1047,6 +1079,9 @@ void janus_nosip_incoming_rtcp(janus_plugin_session *handle, int video, char *bu
 			JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 			return;
 		}
+		gboolean video = packet->video;
+		char *buf = packet->buffer;
+		uint16_t len = packet->length;
 		/* Forward to our NoSIP peer */
 		if((video && session->media.has_video && session->media.video_rtcp_fd != -1) ||
 				(!video && session->media.has_audio && session->media.audio_rtcp_fd != -1)) {
@@ -1590,9 +1625,7 @@ static void *janus_nosip_handler(void *data) {
 						}
 						/* Send a PLI */
 						JANUS_LOG(LOG_VERB, "Recording video, sending a PLI to kickstart it\n");
-						char buf[12];
-						janus_rtcp_pli((char *)&buf, 12);
-						gateway->relay_rtcp(session->handle, 1, buf, 12);
+						gateway->send_pli(session->handle);
 					}
 				}
 			} else {
@@ -1838,7 +1871,7 @@ char *janus_nosip_sdp_manipulate(janus_nosip_session *session, janus_sdp *sdp, g
 }
 
 static int janus_nosip_bind_socket(int fd, int port) {
-	struct sockaddr_in rtp_address;
+	struct sockaddr_in rtp_address = { 0 };
 	rtp_address.sin_family = AF_INET;
 	rtp_address.sin_port = htons(port);
 	inet_pton(AF_INET, local_ip, &rtp_address.sin_addr.s_addr);
@@ -2061,7 +2094,10 @@ static void janus_nosip_media_cleanup(janus_nosip_session *session) {
 	}
 	session->media.local_audio_rtp_port = 0;
 	session->media.local_audio_rtcp_port = 0;
+	session->media.remote_audio_rtp_port = 0;
+	session->media.remote_audio_rtcp_port = 0;
 	session->media.audio_ssrc = 0;
+	session->media.audio_ssrc_peer = 0;
 	if(session->media.video_rtp_fd != -1) {
 		close(session->media.video_rtp_fd);
 		session->media.video_rtp_fd = -1;
@@ -2072,7 +2108,10 @@ static void janus_nosip_media_cleanup(janus_nosip_session *session) {
 	}
 	session->media.local_video_rtp_port = 0;
 	session->media.local_video_rtcp_port = 0;
+	session->media.remote_video_rtp_port = 0;
+	session->media.remote_video_rtcp_port = 0;
 	session->media.video_ssrc = 0;
+	session->media.video_ssrc_peer = 0;
 	session->media.simulcast_ssrc = 0;
 	if(session->media.pipefd[0] > 0) {
 		close(session->media.pipefd[0]);
@@ -2084,6 +2123,9 @@ static void janus_nosip_media_cleanup(janus_nosip_session *session) {
 	}
 	/* Clean up SRTP stuff, if needed */
 	janus_nosip_srtp_cleanup(session);
+
+	/* Media fields not cleaned up elsewhere */
+	janus_nosip_media_reset(session);
 }
 
 /* Thread to relay RTP/RTCP frames coming from the peer */
@@ -2097,7 +2139,7 @@ static void *janus_nosip_relay_thread(void *data) {
 
 	/* File descriptors */
 	socklen_t addrlen;
-	struct sockaddr_in remote;
+	struct sockaddr_in remote = { 0 };
 	int resfd = 0, bytes = 0, pollerrs = 0;
 	struct pollfd fds[5];
 	int pipe_fd = session->media.pipefd[0];
@@ -2121,12 +2163,12 @@ static void *janus_nosip_relay_thread(void *data) {
 			session->media.updated = FALSE;
 
 			have_audio_server_ip = session->media.remote_audio_ip != NULL;
-			struct sockaddr_in audio_server_addr;
+			struct sockaddr_in audio_server_addr = { 0 };
 			memset(&audio_server_addr, 0, sizeof(struct sockaddr_in));
 			audio_server_addr.sin_family = AF_INET;
 
 			have_video_server_ip = session->media.remote_video_ip != NULL;
-			struct sockaddr_in video_server_addr;
+			struct sockaddr_in video_server_addr = { 0 };
 			memset(&video_server_addr, 0, sizeof(struct sockaddr_in));
 			video_server_addr.sin_family = AF_INET;
 
@@ -2306,8 +2348,7 @@ static void *janus_nosip_relay_thread(void *data) {
 					}
 					/* Check if the SSRC changed (e.g., after a re-INVITE or UPDATE) */
 					guint32 timestamp = ntohl(header->timestamp);
-					janus_rtp_header_update(header, &session->media.context, video,
-						(video ? (vstep ? vstep : 4500) : (astep ? astep : 960)));
+					janus_rtp_header_update(header, &session->media.context, video, 0);
 					if(video) {
 						if(vts == 0) {
 							vts = timestamp;
@@ -2330,7 +2371,9 @@ static void *janus_nosip_relay_thread(void *data) {
 					/* Save the frame if we're recording */
 					janus_recorder_save_frame(video ? session->vrc_peer : session->arc_peer, buffer, bytes);
 					/* Relay to browser */
-					gateway->relay_rtp(session->handle, video, buffer, bytes);
+					janus_plugin_rtp rtp = { .video = video, .buffer = buffer, .length = bytes };
+					janus_plugin_rtp_extensions_reset(&rtp.extensions);
+					gateway->relay_rtp(session->handle, &rtp);
 					continue;
 				} else {
 					/* Audio or Video RTCP */
@@ -2351,7 +2394,8 @@ static void *janus_nosip_relay_thread(void *data) {
 						bytes = buflen;
 					}
 					/* Relay to browser */
-					gateway->relay_rtcp(session->handle, video, buffer, bytes);
+					janus_plugin_rtcp rtcp = { .video = video, .buffer = buffer, bytes };
+					gateway->relay_rtcp(session->handle, &rtcp);
 					continue;
 				}
 			}

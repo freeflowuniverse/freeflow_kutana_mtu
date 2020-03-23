@@ -81,7 +81,7 @@ $(document).ready(function() {
 				{
 					server: server,
 					success: function() {
-						// Attach to video room test plugin
+						// Attach to VideoRoom plugin
 						janus.attach(
 							{
 								plugin: "janus.plugin.videoroom",
@@ -241,7 +241,7 @@ $(document).ready(function() {
 													// This is a "no such room" error: give a more meaningful description
 													bootbox.alert(
 														"<p>Apparently room <code>" + myroom + "</code> (the one this demo uses as a test room) " +
-														"does not exist...</p><p>Do you have an updated <code>janus.plugin.videoroom.cfg</code> " +
+														"does not exist...</p><p>Do you have an updated <code>janus.plugin.videoroom.jcfg</code> " +
 														"configuration file? If not, make sure you copy the details of room <code>" + myroom + "</code> " +
 														"from that sample in your current configuration file, then restart Janus and try again."
 													);
@@ -416,7 +416,7 @@ function publishOwnFeed(useAudio) {
 				// a codec will only work if: (1) the codec is actually in the SDP (and
 				// so the browser supports it), and (2) the codec is in the list of
 				// allowed codecs in a room. With respect to the point (2) above,
-				// refer to the text in janus.plugin.videoroom.cfg for more details
+				// refer to the text in janus.plugin.videoroom.jcfg for more details
 				sfutest.send({"message": publish, "jsep": jsep});
 			},
 			error: function(error) {

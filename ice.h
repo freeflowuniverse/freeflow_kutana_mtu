@@ -35,18 +35,22 @@
  * @param[in] ice_lite Whether the ICE Lite mode should be enabled or not
  * @param[in] ice_tcp Whether ICE-TCP support should be enabled or not (only libnice >= 0.1.8, currently broken)
  * @param[in] full_trickle Whether full-trickle must be used (instead of half-trickle)
+ * @param[in] ignore_mdns Whether mDNS candidates should be ignored, instead of resolved
  * @param[in] ipv6 Whether IPv6 candidates must be negotiated or not
  * @param[in] rtp_min_port Minimum port to use for RTP/RTCP, if a range is to be used
  * @param[in] rtp_max_port Maximum port to use for RTP/RTCP, if a range is to be used */
-void janus_ice_init(gboolean ice_lite, gboolean ice_tcp, gboolean full_trickle, gboolean ipv6, uint16_t rtp_min_port, uint16_t rtp_max_port);
+void janus_ice_init(gboolean ice_lite, gboolean ice_tcp, gboolean full_trickle, gboolean ignore_mdns,
+	gboolean ipv6, uint16_t rtp_min_port, uint16_t rtp_max_port);
 /*! \brief ICE stuff de-initialization */
 void janus_ice_deinit(void);
 /*! \brief Method to check whether a STUN server is reachable
  * @param[in] addr Address of the STUN server as a janus_network_address instance
  * @param[in] port Port of the STUN server
+ * @param[in] local_port Local port to bind to (0 means random choice)
  * @param[out] public_addr Public address returned by the STUN server as a janus_network_address instance
+ * @param[out] public_port Public port returned by the STUN server
  * @returns 0 in case of success, a negative integer on errors */
-int janus_ice_test_stun_server(janus_network_address *addr, uint16_t port, janus_network_address *public_addr);
+int janus_ice_test_stun_server(janus_network_address *addr, uint16_t port, uint16_t local_port, janus_network_address *public_addr, uint16_t *public_port);
 /*! \brief Method to force Janus to use a STUN server when gathering candidates
  * @param[in] stun_server STUN server address to use
  * @param[in] stun_port STUN port to use
@@ -117,15 +121,18 @@ gboolean janus_ice_is_ice_tcp_enabled(void);
 /*! \brief Method to check whether full-trickle support is enabled or not
  * @returns true if full-trickle support is enabled, false otherwise */
 gboolean janus_ice_is_full_trickle_enabled(void);
+/*! \brief Method to check whether mDNS resolution is enabled or not
+ * @returns true if mDNS resolution is enabled, false otherwise */
+gboolean janus_ice_is_mdns_enabled(void);
 /*! \brief Method to check whether IPv6 candidates are enabled/supported or not (still WIP)
  * @returns true if IPv6 candidates are enabled/supported, false otherwise */
 gboolean janus_ice_is_ipv6_enabled(void);
-/*! \brief Method to modify the max NACK value (i.e., the number of packets per handle to store for retransmissions)
- * @param[in] mnq The new max NACK value */
-void janus_set_max_nack_queue(uint mnq);
-/*! \brief Method to get the current max NACK value (i.e., the number of packets per handle to store for retransmissions)
- * @returns The current max NACK value */
-uint janus_get_max_nack_queue(void);
+/*! \brief Method to modify the min NACK value (i.e., the minimum time window of packets per handle to store for retransmissions)
+ * @param[in] mnq The new min NACK value */
+void janus_set_min_nack_queue(uint16_t mnq);
+/*! \brief Method to get the current min NACK value (i.e., the minimum time window of packets per handle to store for retransmissions)
+ * @returns The current min NACK value */
+uint16_t janus_get_min_nack_queue(void);
 /*! \brief Method to modify the no-media event timer (i.e., the number of seconds where no media arrives before Janus notifies this)
  * @param[in] timer The new timer value, in seconds */
 void janus_set_no_media_timer(uint timer);
@@ -144,12 +151,6 @@ void janus_set_twcc_period(uint period);
 /*! \brief Method to get the current TWCC period (see above)
  * @returns The current TWCC period */
 uint janus_get_twcc_period(void);
-/*! \brief Method to enable or disable the RFC4588 support negotiation
- * @param[in] enabled The new timer value, in seconds */
-void janus_set_rfc4588_enabled(gboolean enabled);
-/*! \brief Method to check whether the RFC4588 support is enabled
- * @returns TRUE if it's enabled, FALSE otherwise */
-gboolean janus_is_rfc4588_enabled(void);
 /*! \brief Method to modify the event handler statistics period (i.e., the number of seconds that should pass before Janus notifies event handlers about media statistics for a PeerConnection)
  * @param[in] period The new period value, in seconds */
 void janus_ice_set_event_stats_period(int period);
@@ -376,6 +377,8 @@ struct janus_ice_stream {
 	GList *video_payload_types;
 	/*! \brief Mapping of rtx payload types to actual media-related packet types */
 	GHashTable *rtx_payload_types;
+	/*! \brief Mapping of payload types to their clock rates, as advertised in the SDP */
+	GHashTable *clock_rates;
 	/*! \brief RTP payload types of this stream */
 	gint audio_payload_type, video_payload_type, video_rtx_payload_type;
 	/*! \brief Codecs used by this stream */
@@ -388,6 +391,8 @@ struct janus_ice_stream {
 	janus_rtcp_context *audio_rtcp_ctx;
 	/*! \brief RTCP context(s) for the video stream (may be simulcasting) */
 	janus_rtcp_context *video_rtcp_ctx[3];
+	/*! \brief Size of the NACK queue (in ms), dynamically updated per the RTT */
+	uint16_t nack_queue_ms;
 	/*! \brief Map(s) of the NACKed packets (to track retransmissions and avoid duplicates) */
 	GHashTable *rtx_nacked[3];
 	/*! \brief First received audio NTP timestamp */
@@ -406,12 +411,18 @@ struct janus_ice_stream {
 	gint mid_ext_id;
 	/*! \brief RTP Stream extension ID, and the related rtx one */
 	gint rid_ext_id, ridrtx_ext_id;
+	/*! \brief Audio levels extension ID */
+	gint audiolevel_ext_id;
+	/*! \brief Video orientation extension ID */
+	gint videoorientation_ext_id;
 	/*! \brief Frame marking extension ID */
 	gint framemarking_ext_id;
 	/*! \brief Whether we do transport wide cc for video */
 	gboolean do_transport_wide_cc;
 	/*! \brief Transport wide cc rtp ext ID */
 	gint transport_wide_cc_ext_id;
+	/*! \brief Last sent transport wide seq num */
+	guint16 transport_wide_cc_out_seq_num;
 	/*! \brief Last received transport wide seq num */
 	guint32 transport_wide_cc_last_seq_num;
 	/*! \brief Last transport wide seq num sent on feedback */
@@ -583,28 +594,30 @@ void janus_ice_component_destroy(janus_ice_component *component);
 ///@{
 /*! \brief Core RTP callback, called when a plugin has an RTP packet to send to a peer
  * @param[in] handle The Janus ICE handle associated with the peer
- * @param[in] video Whether this is an audio or a video frame
- * @param[in] buf The packet data (buffer)
- * @param[in] len The buffer lenght */
-void janus_ice_relay_rtp(janus_ice_handle *handle, int video, char *buf, int len);
+ * @param[in] packet The RTP packet to send */
+void janus_ice_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet);
 /*! \brief Core RTCP callback, called when a plugin has an RTCP message to send to a peer
  * @param[in] handle The Janus ICE handle associated with the peer
- * @param[in] video Whether this is related to an audio or a video stream
- * @param[in] buf The message data (buffer)
- * @param[in] len The buffer lenght */
-void janus_ice_relay_rtcp(janus_ice_handle *handle, int video, char *buf, int len);
+ * @param[in] packet The RTCP message to send */
+void janus_ice_relay_rtcp(janus_ice_handle *handle, janus_plugin_rtcp *packet);
 /*! \brief Core SCTP/DataChannel callback, called when a plugin has data to send to a peer
  * @param[in] handle The Janus ICE handle associated with the peer
- * @param[in] label The label of the data channel to use
- * @param[in] buf The message data (buffer)
- * @param[in] len The buffer lenght */
-void janus_ice_relay_data(janus_ice_handle *handle, char *label, char *buf, int len);
+ * @param[in] packet The message to send */
+void janus_ice_relay_data(janus_ice_handle *handle, janus_plugin_data *packet);
+/*! \brief Helper core callback, called when a plugin wants to send a RTCP PLI to a peer
+ * @param[in] handle The Janus ICE handle associated with the peer */
+void janus_ice_send_pli(janus_ice_handle *handle);
+/*! \brief Helper core callback, called when a plugin wants to send a RTCP REMB to a peer
+ * @param[in] handle The Janus ICE handle associated with the peer
+ * @param[in] bitrate The bitrate value to put in the REMB message */
+void janus_ice_send_remb(janus_ice_handle *handle, uint32_t bitrate);
 /*! \brief Plugin SCTP/DataChannel callback, called by the SCTP stack when when there's data for a plugin
  * @param[in] handle The Janus ICE handle associated with the peer
  * @param[in] label The label of the data channel the message is from
+ * @param[in] textdata Whether the buffer is text (domstring) or binary data
  * @param[in] buffer The message data (buffer)
  * @param[in] length The buffer lenght */
-void janus_ice_incoming_data(janus_ice_handle *handle, char *label, char *buffer, int length);
+void janus_ice_incoming_data(janus_ice_handle *handle, char *label, gboolean textdata, char *buffer, int length);
 /*! \brief Core SCTP/DataChannel callback, called by the SCTP stack when when there's data to send.
  * @param[in] handle The Janus ICE handle associated with the peer
  * @param[in] buffer The message data (buffer)
