@@ -6,7 +6,6 @@ RUN apt-get update -y \
     build-essential \
     libmicrohttpd-dev \
     libjansson-dev \
-    libnice-dev \
     libssl-dev \
     libsofia-sip-ua-dev \
     libglib2.0-dev \
@@ -31,7 +30,9 @@ RUN apt-get update -y \
     nginx \
     curl
 
-RUN curl -sL https://deb.nodesource.com/setup_11.x | sudo -E bash -
+RUN apt-get remove libnice* -y
+
+RUN curl -sL https://deb.nodesource.com/setup_12.x | sudo -E bash -
 
 RUN apt install -y nodejs
 
@@ -61,17 +62,17 @@ RUN cd / \
     && sudo make install
 
 RUN cd / \ 
-    && git clone https://gitlab.freedesktop.org/libnice/libnice \
-    && cd libnice \
+    && wget -c https://libnice.freedesktop.org/releases/libnice-0.1.16.tar.gz -O - | tar -xz \
+    && cd libnice-0.1.16 \
     && ./autogen.sh \
     && ./configure --prefix=/usr \
-    && make && sudo make install
+    && make && make install
 
 COPY . /janus-gateway/
 COPY .git/ /.git
 WORKDIR /janus-gateway/
 RUN ./autogen.sh
-RUN ./configure --prefix=/opt/janus --enable-javascript-es-module --disable-unix-sockets --disable-rabbitmq --disable-mqtt --disable-plugin-audiobridge --disable-data-channels --disable-plugin-echotest --disable-plugin-recordplay --disable-plugin-sip --disable-plugin-sipre --disable-plugin-nosip --disable-plugin-textroom --disable-plugin-videocall --disable-plugin-voicemail
+RUN ./configure --prefix=/opt/janus --enable-javascript-es-module --disable-unix-sockets --disable-rabbitmq --disable-mqtt --disable-plugin-audiobridge --disable-plugin-echotest --disable-plugin-recordplay --disable-plugin-sip --disable-plugin-sipre --disable-plugin-nosip --disable-plugin-voicemail
 RUN make CFLAGS='-std=c99'
 RUN make install
 
@@ -80,11 +81,11 @@ FROM ubuntu:18.04
 RUN apt-get update -y \
     && apt-get upgrade -y
 RUN apt-get update --fix-missing -y
+
 RUN apt-get install -y \
     build-essential \
     libmicrohttpd-dev \
     libjansson-dev \
-    libnice-dev \
     libssl-dev \
     libsofia-sip-ua-dev \
     libglib2.0-dev \
@@ -107,6 +108,8 @@ RUN apt-get install -y \
     cmake \
     wget \
     nginx
+
+RUN apt-get remove libnice* -y
 
 COPY ./plugins /opt/janus/lib/janus/plugins
 COPY --from=builder /janus-gateway/plugins /opt/janus/lib/janus/plugins
@@ -132,13 +135,14 @@ RUN mkdir libs
 COPY --from=builder /usrsctp libs/usrsctp
 COPY --from=builder /libsrtp-2.1.0 libs/libsrtp-2.1.0
 COPY --from=builder /usr/lib/cmake/libwebsockets /usr/lib/cmake/libwebsockets
-COPY --from=builder /libnice libs/libnice
+COPY --from=builder /libnice-0.1.16 libs/libnice-0.1.16
 COPY ./certs/* /opt/janus/share/janus/localcerts/
 COPY ./certs/* /opt/janus/share/janus/certs/
 COPY ./certs /certs
 RUN cd libs/usrsctp && make install
 RUN cd libs/libsrtp-2.1.0 && make install
-RUN cd libs/libnice && make install
+RUN cd libs/libnice-0.1.16 && ./autogen.sh && ./configure --prefix=/usr && make && make install
+RUN mkdir /opt/janus/lib/janus/loggers
 
 COPY ./configs/* /opt/janus/etc/janus/
 COPY ./html/* /janus-gateway/html/
