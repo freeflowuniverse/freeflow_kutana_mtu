@@ -46,11 +46,11 @@ general: {
 									# handlers (default=true)
 }
 
-room-1234: {
+room-1337: {
 	description = "Demo Room"
 	secret = "adminpwd"
-	publishers = 6
-	bitrate = 128000
+	publishers = 16
+	bitrate = 4096000
 	fir_freq = 10
 	#audiocodec = "opus"
 	#videocodec = "vp8"

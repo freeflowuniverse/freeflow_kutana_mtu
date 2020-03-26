@@ -147,15 +147,15 @@ certificates: {
 # times, but may not work in case the RTT of the user is high: as such,
 # you should pick a reasonable trade-off (usually 2*max expected RTT).
 media: {
-	#ipv6 = true
-	#max_nack_queue = 500
-	#rfc_4588 = true
-	#rtp_port_range = "20000-40000"
-	#dtls_mtu = 1200
-	#no_media_timer = 1
-	#slowlink_threshold = 4
-	#twcc_period = 200
-	#dtls_timeout = 500
+	ipv6 = true
+	max_nack_queue = 500
+	rfc_4588 = true
+	rtp_port_range = "20000-40000"
+	dtls_mtu = 1200
+	no_media_timer = 1
+	slowlink_threshold = 4
+	twcc_period = 200
+	dtls_timeout = 500
 }
 
 # NAT-related stuff: specifically, you can configure the STUN/TURN

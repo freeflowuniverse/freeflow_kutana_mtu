@@ -28,7 +28,8 @@ RUN apt-get update -y \
     cmake \
     wget \
     nginx \
-    curl
+    curl \
+    nano
 
 RUN apt-get remove libnice* -y
 
