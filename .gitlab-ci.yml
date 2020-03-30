@@ -15,8 +15,8 @@ staging_deploy:
     script:
         - echo "Building and deploying ffc_janus staging."
         - docker rm -f ffc_janus || true
-        - docker build -t 3bot_app_jimber/ffc_janus:staging .
-        - docker run -d -it --name=ffc_janus --network=ffc 3bot_app_jimber/ffc:staging
+        - docker build -t 3bot_app_jimber/freeflowconnect_janus:staging .
+        - docker run -d -it --name=ffc_janus --network=ffc_janus 3bot_app_jimber/freeflowconnect_janus:staging
     
 deploy:
     stage: deploy
@@ -27,6 +27,6 @@ deploy:
     script:
         - echo "Building and deploying ffc_janus production."
         - docker rm -f ffc_janus || true
-        - docker build -t 3bot_app_jimber/ffc_janus:$CI_COMMIT_TAG .
-        - docker run -d -it --name=ffc_janus --network=ffc 3bot_app_jimber/ffc_janus:$CI_COMMIT_TAG
+        - docker build -t 3bot_app_jimber/freeflowconnect_janus:$CI_COMMIT_TAG .
+        - docker run -d -it --name=ffc_janus --network=ffc 3bot_app_jimber/freeflowconnect_janus:$CI_COMMIT_TAG
     
