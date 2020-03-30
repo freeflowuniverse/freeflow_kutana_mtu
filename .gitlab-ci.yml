@@ -3,7 +3,8 @@ cache:
     paths:
       - node_modules/
       - .yarn
-  
+stages:
+    - deploy
 
 staging_deploy:
     stage: deploy
