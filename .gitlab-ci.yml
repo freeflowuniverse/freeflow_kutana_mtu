@@ -26,7 +26,7 @@ deploy:
         - testserver
     script:
         - echo "Building and deploying ffc_janus production."
-        - docker rm -f ffc_janus || true
+        - docker rm -f ffc_janus_gateway || true
         - docker-compose build
         - docker-compose up -d
     
