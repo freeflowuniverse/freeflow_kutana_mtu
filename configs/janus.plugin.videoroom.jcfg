@@ -46,6 +46,18 @@ general: {
 									# handlers (default=true)
 }
 
+room-1234: {
+	description = "Demo Room"
+	secret = "adminpwd"
+	publishers = 16
+	bitrate = 4096000
+	fir_freq = 10
+	#audiocodec = "opus"
+	#videocodec = "vp8"
+	record = false
+	#rec_dir = "/path/to/recordings-folder"
+}
+
 room-1337: {
 	description = "Demo Room"
 	secret = "adminpwd"
