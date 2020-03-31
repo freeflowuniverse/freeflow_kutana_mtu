@@ -14,10 +14,10 @@ staging_deploy:
         - testserver
     script:
         - echo "Building and deploying ffc_janus staging."
-        - docker rm -f ffc_janus || true
-        - docker build -t 3bot_app_jimber/freeflowconnect_janus:staging .
-        - docker run -d -it --name=ffc_janus --network=ffc_janus 3bot_app_jimber/freeflowconnect_janus:staging
-    
+        - docker rm -f ffc_janus_gateway || true
+        - docker-compose build
+        - docker-compose up -d
+
 deploy:
     stage: deploy
     only:
@@ -27,6 +27,6 @@ deploy:
     script:
         - echo "Building and deploying ffc_janus production."
         - docker rm -f ffc_janus || true
-        - docker build -t 3bot_app_jimber/freeflowconnect_janus:$CI_COMMIT_TAG .
-        - docker run -d -it --name=ffc_janus --network=ffc 3bot_app_jimber/freeflowconnect_janus:$CI_COMMIT_TAG
+        - docker-compose build
+        - docker-compose up -d
     

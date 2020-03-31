@@ -2,7 +2,8 @@ version: '3'
 
 services:
   janus_gateway:
-    network_mode: host
+    networks:
+      - ffc_janus
     container_name: ffc_janus_gateway
     image: jimber/ffc_janus_gateway:latest
     build:
@@ -17,3 +18,7 @@ services:
       - "8089:8089"
       - "8188:8989"
       - "10000-10200:10000-10200/udp"
+    restart: always
+
+networks:
+  ffc_janus:
