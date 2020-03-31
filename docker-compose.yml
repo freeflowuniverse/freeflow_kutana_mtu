@@ -3,7 +3,8 @@ version: '3'
 services:
   janus_gateway:
     networks:
-      - ffc_janus
+      ffc_janus:
+        ipv6_address: 2a02:1811:b229:9f04:0:0:0:2
     container_name: ffc_janus_gateway
     image: jimber/ffc_janus_gateway:latest
     build:
@@ -22,3 +23,8 @@ services:
 
 networks:
   ffc_janus:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      - subnet: 2a02:1811:b229:9f04:0:0:0:0/64
