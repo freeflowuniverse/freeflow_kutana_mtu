@@ -1,4 +1,4 @@
-Janus WebRTC Server
+Janus WebRTC Server for Freeflowconnect
 ===================
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](COPYING)
 [![Build Status](https://travis-ci.org/meetecho/janus-gateway.svg?branch=master)](https://travis-ci.org/meetecho/janus-gateway)
