@@ -10,15 +10,7 @@ services:
     build:
       context: ./
       dockerfile: ./Dockerfile
-    # volumes:
-    #   - /opt/ffc/janus-gateway/certs:/opt/janus/share/janus/certs
-    ports:
-      - "7088:7088"
-      - "7889:7889"
-      - "8088:8088" # http
-      - "8089:8089" # https
-      - "8188:8989"
-      - "10000-10200:10000-10200/udp"
+      network: host
     restart: always
 
 networks:
