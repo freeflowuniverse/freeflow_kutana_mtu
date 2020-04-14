@@ -205,6 +205,7 @@ $(document).ready(function() {
 												// One of the publishers has gone away?
 												var leaving = msg["leaving"];
 												Janus.log("Publisher left: " + leaving);
+												console.log("Stop screenshare? ")
 												if(role === "listener" && msg["leaving"] === source) {
 													bootbox.alert("The screen sharing session is over, the publisher left", function() {
 														window.location.reload();
