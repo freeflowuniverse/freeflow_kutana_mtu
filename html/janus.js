@@ -1775,7 +1775,7 @@ function Janus(gatewayCallbacks) {
 				event.track.onended = function(ev) {
 					Janus.log("Remote track muted/removed:", ev);
 					if(config.remoteStream) {
-						config.remoteStream.removeTrack(ev.target);
+						// config.remoteStream.removeTrack(ev.target);
 						pluginHandle.onremotestream(config.remoteStream);
 					}
 				};
@@ -2028,7 +2028,7 @@ function Janus(gatewayCallbacks) {
 				if(config.myStream && config.myStream.getAudioTracks() && config.myStream.getAudioTracks().length) {
 					var s = config.myStream.getAudioTracks()[0];
 					Janus.log("Removing audio track:", s);
-					config.myStream.removeTrack(s);
+					// config.myStream.removeTrack(s);
 					try {
 						s.stop();
 					} catch(e) {};
@@ -2043,7 +2043,7 @@ function Janus(gatewayCallbacks) {
 						for(var s of config.pc.getSenders()) {
 							if(s && s.track && s.track.kind === "audio") {
 								Janus.log("Removing audio sender:", s);
-								config.pc.removeTrack(s);
+								// config.pc.removeTrack(s);
 							}
 						}
 					}
@@ -2053,7 +2053,7 @@ function Janus(gatewayCallbacks) {
 				if(config.myStream && config.myStream.getVideoTracks() && config.myStream.getVideoTracks().length) {
 					var s = config.myStream.getVideoTracks()[0];
 					Janus.log("Removing video track:", s);
-					config.myStream.removeTrack(s);
+					// config.myStream.removeTrack(s);
 					try {
 						s.stop();
 					} catch(e) {};
@@ -2068,7 +2068,7 @@ function Janus(gatewayCallbacks) {
 						for(var s of config.pc.getSenders()) {
 							if(s && s.track && s.track.kind === "video") {
 								Janus.log("Removing video sender:", s);
-								config.pc.removeTrack(s);
+								// config.pc.removeTrack(s);
 							}
 						}
 					}
