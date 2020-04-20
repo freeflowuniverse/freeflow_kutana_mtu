@@ -2068,7 +2068,7 @@ function Janus(gatewayCallbacks) {
 						for(var s of config.pc.getSenders()) {
 							if(s && s.track && s.track.kind === "video") {
 								Janus.log("Removing video sender:", s);
-								// config.pc.removeTrack(s);
+								config.pc.removeTrack(s);
 							}
 						}
 					}
