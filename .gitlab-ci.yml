@@ -6,6 +6,21 @@ cache:
 stages:
     - deploy
 
+
+testing_deploy:
+    stage: deploy
+    only:
+        - /^v(\d+\.)?(\d+\.)?(\*|\d+)-test\d*$/
+    tags:
+        - testserver
+    script:
+        - echo "Building and deploying ffc_janus testing."
+        - docker rm -f ffc_janus_gateway || true
+        - docker-compose build
+        - docker network rm freeflowconnect_janus_ffc_janus
+        - docker network create --driver bridge --ipv6 --subnet 2a02:1811:b229:9f04:0:0:0:0/64 freeflowconnect_janus_ffc_janus --attachable
+        - docker-compose up -d
+
 staging_deploy:
     stage: deploy
     only:
