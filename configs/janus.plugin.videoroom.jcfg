@@ -45,29 +45,3 @@ general: {
 	#events = false					# Whether events should be sent to event
 									# handlers (default=true)
 }
-
-room-1234: {
-	description = "Demo Room"
-	secret = "adminpwd"
-	publishers = 16
-	bitrate = 2048000
-	bitrate_cap = true
-	fir_freq = 10
-	#audiocodec = "opus"
-	#videocodec = "vp8"
-	record = false
-	#rec_dir = "/path/to/recordings-folder"
-}
-
-room-1337: {
-	description = "Demo Room"
-	secret = "adminpwd"
-	publishers = 16
-	bitrate = 2048000
-	bitrate_cap = true
-	fir_freq = 10
-	#audiocodec = "opus"
-	#videocodec = "vp8"
-	record = false
-	#rec_dir = "/path/to/recordings-folder"
-}
