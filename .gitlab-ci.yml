@@ -1,47 +1,59 @@
-#caching modules
 cache:
     paths:
       - node_modules/
       - .yarn
+
 stages:
+    - build
     - deploy
 
-
-testing_deploy:
-    stage: deploy
+staging_build:
+    stage: build
     only:
-        - /^v(\d+\.)?(\d+\.)?(\*|\d+)-test\d*$/
+        - /^v(\d+\.)?(\d+\.)?(\*|\d+)-rc\d*$/
     tags:
-        - testserver
+        - ffcbuilder
     script:
-        - echo "Building and deploying ffc_janus testing."
-        - docker rm -f ffc_janus_gateway || true
-        - docker-compose build
-        - docker network rm freeflowconnect_janus_ffc_janus
-        - docker network create --driver bridge --ipv6 --subnet 2a02:1811:b229:9f04:0:0:0:0/64 freeflowconnect_janus_ffc_janus --attachable
-        - docker-compose up -d
+        - echo "$DOCKER_PW" | docker login -u $DOCKER_USER --password-stdin
+        - echo "Building ffc_janus staging."
+        - docker build -t jimber/ffc_janus_gateway:staging-$CI_COMMIT_TAG .
+        - docker push jimber/ffc_janus_gateway:staging-$CI_COMMIT_TAG
 
 staging_deploy:
     stage: deploy
     only:
         - /^v(\d+\.)?(\d+\.)?(\*|\d+)-rc\d*$/
     tags:
-        - testserver
+        - ffcstaging
     script:
-        - echo "Building and deploying ffc_janus staging."
+        - echo "$DOCKER_PW" | docker login -u $DOCKER_USER --password-stdin
+        - echo "Deploying ffc_janus staging."
+        - docker pull jimber/ffc_janus_gateway:staging-$CI_COMMIT_TAG
         - docker rm -f ffc_janus_gateway || true
-        - docker-compose build
-        - docker-compose up -d
+        - docker run -dit --network host --name=ffc_janus_gateway jimber/ffc_janus_gateway:staging-$CI_COMMIT_TAG
 
-deploy:
-    stage: deploy
+production_build:
+    stage: build
     only:
         - /^(\d+\.)?(\d+\.)?(\*|\d+)$/
     tags:
-        - testserver
+        - ffcbuilder
     script:
-        - echo "Building and deploying ffc_janus production."
+        - echo "$DOCKER_PW" | docker login -u $DOCKER_USER --password-stdin
+        - echo "Building ffc_janus production."
+        - docker build -t jimber/ffc_janus_gateway:production-$CI_COMMIT_TAG .
+        - docker push jimber/ffc_janus_gateway:production-$CI_COMMIT_TAG
+
+production_deploy:
+    stage: deploy
+    when: manual
+    only:
+        - /^(\d+\.)?(\d+\.)?(\*|\d+)$/
+    tags:
+        - ffcproduction
+    script:
+        - echo "$DOCKER_PW" | docker login -u $DOCKER_USER --password-stdin
+        - echo "Deploying ffc_janus production."
+        - docker pull jimber/ffc_janus_gateway:production-$CI_COMMIT_TAG
         - docker rm -f ffc_janus_gateway || true
-        - docker-compose build
-        - docker-compose up -d
-    
+        - docker run -dit --network host --name=ffc_janus_gateway jimber/ffc_janus_gateway:production-$CI_COMMIT_TAG
