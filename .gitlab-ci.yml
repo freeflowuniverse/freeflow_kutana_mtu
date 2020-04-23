@@ -16,8 +16,8 @@ staging_build:
     script:
         - echo "$DOCKER_PW" | docker login -u $DOCKER_USER --password-stdin
         - echo "Building ffc_janus staging."
-        - docker build -t jimber/ffc_janus_gateway:staging-$CI_COMMIT_TAG .
-        - docker push jimber/ffc_janus_gateway:staging-$CI_COMMIT_TAG
+        - docker-compose build
+        - docker-compose push
 
 staging_deploy:
     stage: deploy
@@ -28,9 +28,9 @@ staging_deploy:
     script:
         - echo "$DOCKER_PW" | docker login -u $DOCKER_USER --password-stdin
         - echo "Deploying ffc_janus staging."
-        - docker pull jimber/ffc_janus_gateway:staging-$CI_COMMIT_TAG
         - docker rm -f ffc_janus_gateway || true
-        - docker run -dit --network host --name=ffc_janus_gateway jimber/ffc_janus_gateway:staging-$CI_COMMIT_TAG
+        - docker-compose pull
+        - docker-compose up -d
 
 production_build:
     stage: build
@@ -41,8 +41,8 @@ production_build:
     script:
         - echo "$DOCKER_PW" | docker login -u $DOCKER_USER --password-stdin
         - echo "Building ffc_janus production."
-        - docker build -t jimber/ffc_janus_gateway:production-$CI_COMMIT_TAG .
-        - docker push jimber/ffc_janus_gateway:production-$CI_COMMIT_TAG
+        - docker-compose build
+        - docker-compose push
 
 production_deploy:
     stage: deploy
@@ -54,6 +54,6 @@ production_deploy:
     script:
         - echo "$DOCKER_PW" | docker login -u $DOCKER_USER --password-stdin
         - echo "Deploying ffc_janus production."
-        - docker pull jimber/ffc_janus_gateway:production-$CI_COMMIT_TAG
         - docker rm -f ffc_janus_gateway || true
-        - docker run -dit --network host --name=ffc_janus_gateway jimber/ffc_janus_gateway:production-$CI_COMMIT_TAG
+        - docker-compose pull
+        - docker-compose up -d

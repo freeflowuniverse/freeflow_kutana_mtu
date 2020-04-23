@@ -1,11 +1,8 @@
-version: '3'
-
+version: "3.3"
 services:
-  janus_gateway:
+  ffc_janus_gateway:
+    build: .
+    container_name: "ffc_janus_gateway"
+    image: "jimber/ffc_janus_gateway-${ENVIRONMENT}:${CI_COMMIT_TAG}"
     network_mode: "host"
-    container_name: ffc_janus_gateway
-    image: jimber/ffc_janus_gateway:latest
-    build:
-      context: ./
-      dockerfile: ./Dockerfile
     restart: always
