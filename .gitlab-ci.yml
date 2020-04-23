@@ -1,13 +1,10 @@
-cache:
-    paths:
-      - node_modules/
-      - .yarn
-
 stages:
     - build
     - deploy
 
 staging_build:
+    variables:
+        ENVIRONMENT: staging
     stage: build
     only:
         - /^v(\d+\.)?(\d+\.)?(\*|\d+)-rc\d*$/
@@ -20,6 +17,8 @@ staging_build:
         - docker-compose push
 
 staging_deploy:
+    variables:
+        ENVIRONMENT: staging
     stage: deploy
     only:
         - /^v(\d+\.)?(\d+\.)?(\*|\d+)-rc\d*$/
@@ -33,6 +32,8 @@ staging_deploy:
         - docker-compose up -d
 
 production_build:
+    variables:
+        ENVIRONMENT: production
     stage: build
     only:
         - /^v(\d+\.)?(\d+\.)?(\*|\d+)$/
@@ -45,6 +46,8 @@ production_build:
         - docker-compose push
 
 production_deploy:
+    variables:
+        ENVIRONMENT: production
     stage: deploy
     when: manual
     only:
