@@ -1,3 +1,13 @@
+### How to run
+
+```
+export ENVIRONMENT=local && export CI_COMMIT_TAG=v1.0.0 && docker-compose build
+export ENVIRONMENT=local && export CI_COMMIT_TAG=v1.0.0 && docker-compose up -d
+```
+
+
+### Official janus README
+```
 Janus WebRTC Server for Freeflowconnect
 ===================
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](COPYING)
@@ -332,3 +342,4 @@ Janus is thoroughly documented. You can find the current documentation, automati
 Any thought, feedback or (hopefully not!) insult is welcome!
 
 Developed by [@meetecho](https://github.com/meetecho)
+```
