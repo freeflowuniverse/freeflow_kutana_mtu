@@ -147,8 +147,25 @@ RUN mkdir /opt/janus/lib/janus/loggers
 
 COPY ./configs/* /opt/janus/etc/janus/
 COPY ./html/* /janus-gateway/html/
-# COPY nginx.conf /etc/nginx/nginx.conf
-# COPY testfile.txt /opt/nginx/testfile.txt
 
-# COPY conf/stun.cfg /opt/janus/stun.cfg
+RUN apt update
+RUN apt upgrade
+
+RUN apt remove libsrtp0 libsrtp0-dev
+RUN apt install unzip
+
+
+RUN install libmicrohttpd-dev libjansson-dev \
+    libssl-dev libsrtp-dev libsofia-sip-ua-dev libglib2.0-dev \
+    libopus-dev libogg-dev libcurl4-openssl-dev liblua5.3-dev \
+    libconfig-dev pkg-config gengetopt libtool automake
+
+RUN mkdir libsrtp
+RUN cd libsrtp
+RUN wget https://github.com/cisco/libsrtp/archive/v2.3.0.zip
+RUN unzip v2.3.0.zip
+RUN cd libsrtp-2.3.0/
+RUN ./configure --prefix=/usr --enable-openssl
+RUN make shared_library && sudo make installOwner
+
 CMD  /opt/janus/bin/janus
