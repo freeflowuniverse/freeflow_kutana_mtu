@@ -148,11 +148,11 @@ RUN mkdir /opt/janus/lib/janus/loggers
 COPY ./configs/* /opt/janus/etc/janus/
 COPY ./html/* /janus-gateway/html/
 
-RUN apt update
-RUN apt upgrade
+RUN apt update -y
+RUN apt upgrade -y
 
-RUN apt remove libsrtp0 libsrtp0-dev
-RUN apt install unzip
+RUN apt remove libsrtp0 libsrtp0-dev -y
+RUN apt install unzip -y
 
 
 RUN install libmicrohttpd-dev libjansson-dev \
