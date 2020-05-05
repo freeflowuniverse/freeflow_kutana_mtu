@@ -155,17 +155,18 @@ RUN apt remove libsrtp0 libsrtp0-dev -y
 RUN apt install unzip -y
 
 
-RUN install libmicrohttpd-dev libjansson-dev \
+RUN apt install libmicrohttpd-dev libjansson-dev \
     libssl-dev libsrtp-dev libsofia-sip-ua-dev libglib2.0-dev \
     libopus-dev libogg-dev libcurl4-openssl-dev liblua5.3-dev \
-    libconfig-dev pkg-config gengetopt libtool automake
+    libconfig-dev pkg-config gengetopt libtool automake -y
 
 RUN mkdir libsrtp
-RUN cd libsrtp
-RUN wget https://github.com/cisco/libsrtp/archive/v2.3.0.zip
-RUN unzip v2.3.0.zip
-RUN cd libsrtp-2.3.0/
-RUN ./configure --prefix=/usr --enable-openssl
-RUN make shared_library && sudo make installOwner
+RUN cd libsrtp \
+    && wget https://github.com/cisco/libsrtp/archive/v2.3.0.zip \
+    && unzip v2.3.0.zip \
+    && cd libsrtp-2.3.0/ \
+    && ./configure --prefix=/usr --enable-openssl \
+    && make shared_library \
+    && make install
 
 CMD  /opt/janus/bin/janus
