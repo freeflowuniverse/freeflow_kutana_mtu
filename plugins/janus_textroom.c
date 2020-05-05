@@ -790,9 +790,9 @@ static void janus_textroom_message_free(janus_textroom_message *msg) {
 		"o=- %"SCNu64" %"SCNu64" IN IP4 127.0.0.1\r\n"	/* We need current time here */ \
 		"s=Janus TextRoom plugin\r\n" \
 		"t=0 0\r\n" \
-		"m=application 1 DTLS/SCTP 5000\r\n" \
+		"m=application 1 UDP/DTLS/SCTP webrtc-datachannel\r\n" \
 		"c=IN IP4 1.1.1.1\r\n" \
-		"a=sctpmap:5000 webrtc-datachannel 16\r\n"
+		"a=sctp-port:5000\r\n"
 
 
 /* Error codes */
@@ -1454,8 +1454,8 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 			goto msg_response;
 		}
 		janus_refcount_increase(&textroom->ref);
-		janus_mutex_lock(&textroom->mutex);
 		janus_mutex_unlock(&rooms_mutex);
+		janus_mutex_lock(&textroom->mutex);
 		janus_textroom_participant *participant = g_hash_table_lookup(session->rooms,
 			string_ids ? (gpointer)room_id_str : (gpointer)&room_id);
 		if(participant == NULL) {
@@ -1635,8 +1635,8 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 			goto msg_response;
 		}
 		janus_refcount_increase(&textroom->ref);
-		janus_mutex_lock(&textroom->mutex);
 		janus_mutex_unlock(&rooms_mutex);
+		janus_mutex_lock(&textroom->mutex);
 		/* A PIN may be required for this action */
 		JANUS_CHECK_SECRET(textroom->room_pin, root, "pin", error_code, error_cause,
 			JANUS_TEXTROOM_ERROR_MISSING_ELEMENT, JANUS_TEXTROOM_ERROR_INVALID_ELEMENT, JANUS_TEXTROOM_ERROR_UNAUTHORIZED);
@@ -1772,8 +1772,8 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 			goto msg_response;
 		}
 		janus_refcount_increase(&textroom->ref);
-		janus_mutex_lock(&textroom->mutex);
 		janus_mutex_unlock(&rooms_mutex);
+		janus_mutex_lock(&textroom->mutex);
 		janus_mutex_lock(&session->mutex);
 		janus_textroom_participant *participant = g_hash_table_lookup(session->rooms,
 			string_ids ? (gpointer)room_id_str : (gpointer)&room_id);
@@ -2191,8 +2191,8 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 			goto msg_response;
 		}
 		janus_refcount_increase(&textroom->ref);
-		janus_mutex_lock(&textroom->mutex);
 		janus_mutex_unlock(&rooms_mutex);
+		janus_mutex_lock(&textroom->mutex);
 		/* A secret may be required for this action */
 		JANUS_CHECK_SECRET(textroom->room_secret, root, "secret", error_code, error_cause,
 			JANUS_TEXTROOM_ERROR_MISSING_ELEMENT, JANUS_TEXTROOM_ERROR_INVALID_ELEMENT, JANUS_TEXTROOM_ERROR_UNAUTHORIZED);

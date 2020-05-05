@@ -205,6 +205,16 @@ media: {
 	#slowlink_threshold = 4
 	#twcc_period = 100
 	#dtls_timeout = 500
+
+	# If you need DSCP packet marking and prioritization, you can configure
+	# the 'dscp' property to a specific values, and Janus will try to
+	# set it on all outgoing packets using libnice. Normally, the specs
+	# suggest to use different values depending on whether audio, video
+	# or data are used, but since all PeerConnections in Janus are bundled,
+	# we can only use one. You can refer to this document for more info:
+	# https://tools.ietf.org/html/draft-ietf-tsvwg-rtcweb-qos-18#page-6
+	# That said, DON'T TOUCH THIS IF YOU DON'T KNOW WHAT IT MEANS!
+	#dscp = 46
 }
 
 # NAT-related stuff: specifically, you can configure the STUN/TURN
@@ -231,12 +241,13 @@ nat: {
 	#ice_lite = true
 	#ice_tcp = true
 
-	# By default Janus tries to resolve mDNS (.local) candidates: since
-	# this is currently done synchronously and might keep the API busy,
-	# especially in case mDNS resolution takes a long time to timeout,
+	# By default Janus tries to resolve mDNS (.local) candidates: even
+	# though this is now done asynchronously and shouldn't keep the API
+	# busy, even in case mDNS resolution takes a long time to timeout,
 	# you can choose to drop all .local candidates instead, which is
 	# helpful in case you know clients will never be in the same private
-	# network as the one the Janus instance is running from.
+	# network as the one the Janus instance is running from. Notice that
+	# this will cause ICE to fail if mDNS is the only way to connect!
 	#ignore_mdns = true
 
 	# In case you're deploying Janus on a server which is configured with
@@ -310,7 +321,7 @@ nat: {
 	# your machine is ready. Note that Linux distributions offer such directives.
 	# You could use the following directive in systemd: 'After=network-online.target'
 	# https://www.freedesktop.org/software/systemd/man/systemd.unit.html#Before=
-	# ignore_unreachable_ice_server = true
+	#ignore_unreachable_ice_server = true
 }
 
 # You can choose which of the available plugins should be

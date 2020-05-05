@@ -316,14 +316,19 @@ typedef struct janus_ice_queued_packet {
 } janus_ice_queued_packet;
 /* A few static, fake, messages we use as a trigger: e.g., to start a
  * new DTLS handshake, hangup a PeerConnection or close a handle */
-static janus_ice_queued_packet janus_ice_dtls_handshake,
-	janus_ice_hangup_peerconnection, janus_ice_detach_handle;
+static janus_ice_queued_packet
+	janus_ice_start_gathering,
+	janus_ice_add_candidates,
+	janus_ice_dtls_handshake,
+	janus_ice_hangup_peerconnection,
+	janus_ice_detach_handle;
 
 /* Janus NACKed packet we're tracking (to avoid duplicates) */
 typedef struct janus_ice_nacked_packet {
 	janus_ice_handle *handle;
 	int vindex;
 	guint16 seq_number;
+	guint source_id;
 } janus_ice_nacked_packet;
 static gboolean janus_ice_nacked_packet_cleanup(gpointer user_data) {
 	janus_ice_nacked_packet *pkt = (janus_ice_nacked_packet *)user_data;
@@ -332,6 +337,7 @@ static gboolean janus_ice_nacked_packet_cleanup(gpointer user_data) {
 		JANUS_LOG(LOG_HUGE, "[%"SCNu64"] Cleaning up NACKed packet %"SCNu16" (SSRC %"SCNu32", vindex %d)...\n",
 			pkt->handle->handle_id, pkt->seq_number, pkt->handle->stream->video_ssrc_peer[pkt->vindex], pkt->vindex);
 		g_hash_table_remove(pkt->handle->stream->rtx_nacked[pkt->vindex], GUINT_TO_POINTER(pkt->seq_number));
+		g_hash_table_remove(pkt->handle->stream->pending_nacked_cleanup, GUINT_TO_POINTER(pkt->source_id));
 	}
 
 	return G_SOURCE_REMOVE;
@@ -445,6 +451,18 @@ uint janus_get_twcc_period(void) {
 	return twcc_period;
 }
 
+/* DSCP value, which we can set via libnice: it's disabled by default */
+static int dscp_ef = 0;
+void janus_set_dscp(int dscp) {
+	dscp_ef = dscp;
+	if(dscp_ef > 0) {
+		JANUS_LOG(LOG_VERB, "Setting DSCP EF to %d\n", dscp_ef);
+	}
+}
+int janus_get_dscp(void) {
+	return dscp_ef;
+}
+
 
 static inline void janus_ice_free_rtp_packet(janus_rtp_packet *pkt) {
 	if(pkt == NULL) {
@@ -456,8 +474,11 @@ static inline void janus_ice_free_rtp_packet(janus_rtp_packet *pkt) {
 }
 
 static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
-	if(pkt == NULL || pkt == &janus_ice_dtls_handshake ||
-			pkt == &janus_ice_hangup_peerconnection || pkt == &janus_ice_detach_handle) {
+	if(pkt == NULL || pkt == &janus_ice_start_gathering ||
+			pkt == &janus_ice_add_candidates ||
+			pkt == &janus_ice_dtls_handshake ||
+			pkt == &janus_ice_hangup_peerconnection ||
+			pkt == &janus_ice_detach_handle) {
 		return;
 	}
 	g_free(pkt->data);
@@ -594,6 +615,15 @@ static void janus_plugin_session_dereference(janus_plugin_session *plugin_sessio
 		janus_refcount_decrease(&plugin_session->ref);
 }
 
+
+static void janus_ice_clear_queued_candidates(janus_ice_handle *handle) {
+	if(handle == NULL || handle->queued_candidates == NULL) {
+		return;
+	}
+	while(g_async_queue_length(handle->queued_candidates) > 0) {
+		(void)g_async_queue_try_pop(handle->queued_candidates);
+	}
+}
 
 static void janus_ice_clear_queued_packets(janus_ice_handle *handle) {
 	if(handle == NULL || handle->queued_packets == NULL) {
@@ -741,7 +771,7 @@ gint janus_ice_trickle_parse(janus_ice_handle *handle, json_t *candidate, const 
 			return JANUS_ERROR_INVALID_ELEMENT_TYPE;
 		}
 		if(!mid && !mline) {
-			*error = "Trickle error: missing mandatory element (sdpMid or sdlMLineIndex)";
+			*error = "Trickle error: missing mandatory element (sdpMid or sdpMLineIndex)";
 			return JANUS_ERROR_MISSING_MANDATORY_ELEMENT;
 		}
 		json_t *rc = json_object_get(candidate, "candidate");
@@ -1161,6 +1191,7 @@ janus_ice_handle *janus_ice_handle_create(void *core_session, const char *opaque
 	handle->handle_id = handle_id;
 	handle->app = NULL;
 	handle->app_handle = NULL;
+	handle->queued_candidates = g_async_queue_new();
 	handle->queued_packets = g_async_queue_new();
 	janus_mutex_init(&handle->mutex);
 	janus_session_handles_insert(session, handle);
@@ -1268,9 +1299,6 @@ gint janus_ice_handle_destroy(void *core_session, janus_ice_handle *handle) {
 		janus_flags_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT);
 		janus_flags_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_STOP);
 		if(handle->mainloop != NULL) {
-			if(handle->stream_id > 0) {
-				nice_agent_attach_recv(handle->agent, handle->stream_id, 1, g_main_loop_get_context(handle->mainloop), NULL, NULL);
-			}
 			if(static_event_loops == 0 && handle->mainloop != NULL && g_main_loop_is_running(handle->mainloop)) {
 				g_main_loop_quit(handle->mainloop);
 			}
@@ -1302,6 +1330,10 @@ static void janus_ice_handle_free(const janus_refcount *handle_ref) {
 	janus_ice_handle *handle = janus_refcount_containerof(handle_ref, janus_ice_handle, ref);
 	/* This stack can be destroyed, free all the resources */
 	janus_mutex_lock(&handle->mutex);
+	if(handle->queued_candidates != NULL) {
+		janus_ice_clear_queued_candidates(handle);
+		g_async_queue_unref(handle->queued_candidates);
+	}
 	if(handle->queued_packets != NULL) {
 		janus_ice_clear_queued_packets(handle);
 		g_async_queue_unref(handle->queued_packets);
@@ -1354,10 +1386,6 @@ void janus_ice_webrtc_hangup(janus_ice_handle *handle, const char *reason) {
 	JANUS_LOG(LOG_VERB, "[%"SCNu64"] Hanging up PeerConnection because of a %s\n",
 		handle->handle_id, reason);
 	handle->hangup_reason = reason;
-	/* Stop incoming traffic */
-	if(handle->mainloop != NULL && handle->stream_id > 0) {
-		nice_agent_attach_recv(handle->agent, handle->stream_id, 1, g_main_loop_get_context(handle->mainloop), NULL, NULL);
-	}
 	/* Let's message the loop, we'll notify the plugin from there */
 	if(handle->queued_packets != NULL) {
 #if GLIB_CHECK_VERSION(2, 46, 0)
@@ -1401,6 +1429,7 @@ static void janus_ice_webrtc_free(janus_ice_handle *handle) {
 		}
 	}
 	handle->pending_trickles = NULL;
+	janus_ice_clear_queued_candidates(handle);
 	g_free(handle->rtp_profile);
 	handle->rtp_profile = NULL;
 	g_free(handle->local_sdp);
@@ -1434,6 +1463,17 @@ void janus_ice_stream_destroy(janus_ice_stream *stream) {
 		janus_ice_component_destroy(stream->component);
 		stream->component = NULL;
 	}
+	if(stream->pending_nacked_cleanup && g_hash_table_size(stream->pending_nacked_cleanup) > 0) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init(&iter, stream->pending_nacked_cleanup);
+		while(g_hash_table_iter_next(&iter, NULL, &val)) {
+			GSource *source = val;
+			g_source_destroy(source);
+		}
+		g_hash_table_destroy(stream->pending_nacked_cleanup);
+	}
+	stream->pending_nacked_cleanup = NULL;
 	janus_ice_handle *handle = stream->handle;
 	if(handle != NULL) {
 		janus_refcount_decrease(&handle->ref);
@@ -1501,8 +1541,10 @@ static void janus_ice_stream_free(const janus_refcount *stream_ref) {
 	stream->video_first_rtp_ts[0] = 0;
 	stream->video_first_rtp_ts[1] = 0;
 	stream->video_first_rtp_ts[2] = 0;
-	stream->audio_last_ts = 0;
-	stream->video_last_ts = 0;
+	stream->audio_last_rtp_ts = 0;
+	stream->audio_last_ntp_ts = 0;
+	stream->video_last_rtp_ts = 0;
+	stream->video_last_ntp_ts = 0;
 	g_free(stream);
 	stream = NULL;
 }
@@ -2188,6 +2230,10 @@ static void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint comp
 		JANUS_LOG(LOG_VERB, "[%"SCNu64"] Still waiting for the DTLS stack for component %d in stream %d...\n", handle->handle_id, component_id, stream_id);
 		return;
 	}
+	if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_STOP) || janus_is_stopping()) {
+		JANUS_LOG(LOG_VERB, "[%"SCNu64"] Forced to stop it here...\n", handle->handle_id);
+		return;
+	}
 	/* What is this? */
 	if(janus_is_dtls(buf) || (!janus_is_rtp(buf, len) && !janus_is_rtcp(buf, len))) {
 		/* This is DTLS: either handshake stuff, or data coming from SCTP DataChannels */
@@ -2642,10 +2688,13 @@ static void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint comp
 								np->handle = handle;
 								np->seq_number = cur_seq->seq;
 								np->vindex = vindex;
+								if(stream->pending_nacked_cleanup == NULL)
+									stream->pending_nacked_cleanup = g_hash_table_new(NULL, NULL);
 								GSource *timeout_source = g_timeout_source_new_seconds(5);
 								g_source_set_callback(timeout_source, janus_ice_nacked_packet_cleanup, np, (GDestroyNotify)g_free);
-								g_source_attach(timeout_source, handle->mainctx);
+								np->source_id = g_source_attach(timeout_source, handle->mainctx);
 								g_source_unref(timeout_source);
+								g_hash_table_insert(stream->pending_nacked_cleanup, GUINT_TO_POINTER(np->source_id), timeout_source);
 							}
 						} else if(cur_seq->state == SEQ_NACKED  && now - cur_seq->ts > SEQ_NACKED_WAIT) {
 							JANUS_LOG(LOG_HUGE, "[%"SCNu64"] Missed sequence number %"SCNu16" (%s stream #%d), sending 2nd NACK\n",
@@ -2726,6 +2775,9 @@ static void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint comp
 				}
 				/* Is this audio or video? */
 				int video = 0, vindex = 0;
+				if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX)) {
+					janus_rtcp_swap_report_blocks(buf, buflen, stream->video_ssrc_rtx);
+				}
 				/* Bundled streams, should we check the SSRCs? */
 				if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_HAS_AUDIO)) {
 					/* No audio has been negotiated, definitely video */
@@ -2749,6 +2801,9 @@ static void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint comp
 							video = 0;
 						} else if(rtcp_ssrc == stream->video_ssrc) {
 							video = 1;
+						} else if(rtcp_ssrc == stream->video_ssrc_rtx) {
+							/* rtx SSRC, we don't care */
+							return;
 						} else if(janus_rtcp_has_fir(buf, buflen) || janus_rtcp_has_pli(buf, buflen) || janus_rtcp_get_remb(buf, buflen)) {
 							/* Mh, no SR or RR? Try checking if there's any FIR, PLI or REMB */
 							video = 1;
@@ -3142,6 +3197,20 @@ void janus_ice_candidates_to_sdp(janus_ice_handle *handle, janus_sdp_mline *mlin
 	g_slist_free(candidates);
 }
 
+void janus_ice_add_remote_candidate(janus_ice_handle *handle, NiceCandidate *c) {
+	JANUS_LOG(LOG_VERB, "[%"SCNu64"] Queueing candidate %p\n", handle->handle_id, c);
+	if(handle->queued_candidates != NULL)
+		g_async_queue_push(handle->queued_candidates, c);
+	if(handle->queued_packets != NULL) {
+#if GLIB_CHECK_VERSION(2, 46, 0)
+		g_async_queue_push_front(handle->queued_packets, &janus_ice_add_candidates);
+#else
+		g_async_queue_push(handle->queued_packets, &janus_ice_add_candidates);
+#endif
+		g_main_context_wakeup(handle->mainctx);
+	}
+}
+
 void janus_ice_setup_remote_candidates(janus_ice_handle *handle, guint stream_id, guint component_id) {
 	if(!handle || !handle->agent)
 		return;
@@ -3171,32 +3240,22 @@ void janus_ice_setup_remote_candidates(janus_ice_handle *handle, guint stream_id
 	/* Add all candidates */
 	NiceCandidate *c = NULL;
 	GSList *gsc = component->candidates;
-	gchar *rufrag = NULL, *rpwd = NULL;
 	while(gsc) {
 		c = (NiceCandidate *) gsc->data;
-		JANUS_LOG(LOG_VERB, "[%"SCNu64"] >> Remote Stream #%d, Component #%d\n", handle->handle_id, c->stream_id, c->component_id);
-		if(c->username && !rufrag)
-			rufrag = c->username;
-		if(c->password && !rpwd)
-			rpwd = c->password;
-		gchar address[NICE_ADDRESS_STRING_LEN];
-		nice_address_to_string(&(c->addr), (gchar *)&address);
-		gint port = nice_address_get_port(&(c->addr));
-		JANUS_LOG(LOG_VERB, "[%"SCNu64"]   Address:    %s:%d\n", handle->handle_id, address, port);
-		JANUS_LOG(LOG_VERB, "[%"SCNu64"]   Priority:   %d\n", handle->handle_id, c->priority);
-		JANUS_LOG(LOG_VERB, "[%"SCNu64"]   Foundation: %s\n", handle->handle_id, c->foundation);
-		JANUS_LOG(LOG_VERB, "[%"SCNu64"]   Username:   %s\n", handle->handle_id, c->username);
-		JANUS_LOG(LOG_VERB, "[%"SCNu64"]   Password:   %s\n", handle->handle_id, c->password);
+		JANUS_LOG(LOG_VERB, "[%"SCNu64"] Queueing candidate %p (startup)\n", handle->handle_id, c);
+		if(handle->queued_candidates != NULL)
+			g_async_queue_push(handle->queued_candidates, c);
 		gsc = gsc->next;
 	}
-	gint added = nice_agent_set_remote_candidates(handle->agent, stream_id, component_id, component->candidates);
-	if(added < 0 || (guint)added < g_slist_length(component->candidates)) {
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to set remote candidates :-( (added %u, expected %u)\n",
-			handle->handle_id, (guint)added, g_slist_length(component->candidates));
-	} else {
-		JANUS_LOG(LOG_VERB, "[%"SCNu64"] Remote candidates set!\n", handle->handle_id);
-		component->process_started = TRUE;
+	if(handle->queued_packets != NULL) {
+#if GLIB_CHECK_VERSION(2, 46, 0)
+		g_async_queue_push_front(handle->queued_packets, &janus_ice_add_candidates);
+#else
+		g_async_queue_push(handle->queued_packets, &janus_ice_add_candidates);
+#endif
+		g_main_context_wakeup(handle->mainctx);
 	}
+	component->process_started = TRUE;
 }
 
 int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int video, int data, int trickle) {
@@ -3398,6 +3457,10 @@ int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int vi
 	}
 	/* Now create an ICE stream for all the media we'll handle */
 	handle->stream_id = nice_agent_add_stream(handle->agent, 1);
+	if(dscp_ef > 0) {
+		/* A DSCP value was configured, shift it and pass it to libnice as a TOS */
+		nice_agent_set_stream_tos(handle->agent, handle->stream_id, dscp_ef << 2);
+	}
 	janus_ice_stream *stream = g_malloc0(sizeof(janus_ice_stream));
 	janus_refcount_init(&stream->ref, janus_ice_stream_free);
 	janus_refcount_increase(&handle->ref);
@@ -3466,7 +3529,8 @@ int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int vi
 	/* FIXME: libnice supports this since 0.1.0, but the 0.1.3 on Fedora fails with an undefined reference! */
 	nice_agent_set_port_range(handle->agent, handle->stream_id, 1, rtp_range_min, rtp_range_max);
 #endif
-	if(!nice_agent_gather_candidates(handle->agent, handle->stream_id)) {
+	/* Gather now only if we're doing hanf-trickle */
+	if(!janus_full_trickle_enabled && !nice_agent_gather_candidates(handle->agent, handle->stream_id)) {
 		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error gathering candidates...\n", handle->handle_id);
 		janus_flags_clear(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_HAS_AGENT);
 		janus_ice_webrtc_hangup(handle, "Gathering error");
@@ -3490,6 +3554,15 @@ int janus_ice_setup_local(janus_ice_handle *handle, int offer, int audio, int vi
 		return -1;
 	}
 	janus_refcount_increase(&component->dtls->ref);
+	/* If we're doing full-tricke, start gathering asynchronously */
+	if(janus_full_trickle_enabled) {
+#if GLIB_CHECK_VERSION(2, 46, 0)
+		g_async_queue_push_front(handle->queued_packets, &janus_ice_start_gathering);
+#else
+		g_async_queue_push(handle->queued_packets, &janus_ice_start_gathering);
+#endif
+		g_main_context_wakeup(handle->mainctx);
+	}
 	return 0;
 }
 
@@ -3649,10 +3722,10 @@ static gboolean janus_ice_outgoing_rtcp_handle(gpointer user_data) {
 		/* Compute an RTP timestamp coherent with the NTP one */
 		rtcp_context *rtcp_ctx = stream->audio_rtcp_ctx;
 		if(rtcp_ctx == NULL) {
-			sr->si.rtp_ts = htonl(stream->audio_last_ts);	/* FIXME */
+			sr->si.rtp_ts = htonl(stream->audio_last_rtp_ts);	/* FIXME */
 		} else {
 			int64_t ntp = tv.tv_sec*G_USEC_PER_SEC + tv.tv_usec;
-			uint32_t rtp_ts = ((ntp-stream->audio_first_ntp_ts)*(rtcp_ctx->tb))/1000000 + stream->audio_first_rtp_ts;
+			uint32_t rtp_ts = ((ntp-stream->audio_last_ntp_ts)*(rtcp_ctx->tb))/1000000 + stream->audio_last_rtp_ts;
 			sr->si.rtp_ts = htonl(rtp_ts);
 		}
 		sr->si.s_packets = htonl(stream->component->out_stats.audio.packets);
@@ -3710,10 +3783,10 @@ static gboolean janus_ice_outgoing_rtcp_handle(gpointer user_data) {
 		/* Compute an RTP timestamp coherent with the NTP one */
 		rtcp_context *rtcp_ctx = stream->video_rtcp_ctx[0];
 		if(rtcp_ctx == NULL) {
-			sr->si.rtp_ts = htonl(stream->video_last_ts);	/* FIXME */
+			sr->si.rtp_ts = htonl(stream->video_last_rtp_ts);	/* FIXME */
 		} else {
 			int64_t ntp = tv.tv_sec*G_USEC_PER_SEC + tv.tv_usec;
-			uint32_t rtp_ts = ((ntp-stream->video_first_ntp_ts[0])*(rtcp_ctx->tb))/1000000 + stream->video_first_rtp_ts[0];
+			uint32_t rtp_ts = ((ntp-stream->video_last_ntp_ts)*(rtcp_ctx->tb))/1000000 + stream->video_last_rtp_ts;
 			sr->si.rtp_ts = htonl(rtp_ts);
 		}
 		sr->si.s_packets = htonl(stream->component->out_stats.video[0].packets);
@@ -3913,7 +3986,37 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 	janus_session *session = (janus_session *)handle->session;
 	janus_ice_stream *stream = handle->stream;
 	janus_ice_component *component = stream ? stream->component : NULL;
-	if(pkt == &janus_ice_dtls_handshake) {
+	if(pkt == &janus_ice_start_gathering) {
+		/* Start gathering candidates */
+		if(handle->agent == NULL) {
+			JANUS_LOG(LOG_WARN, "[%"SCNu64"] No ICE agent, not going to gather candidates...\n", handle->handle_id);
+		} else if(!nice_agent_gather_candidates(handle->agent, handle->stream_id)) {
+			JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error gathering candidates...\n", handle->handle_id);
+			janus_ice_webrtc_hangup(handle, "ICE gathering error");
+		}
+		return G_SOURCE_CONTINUE;
+	} else if(pkt == &janus_ice_add_candidates) {
+		/* There are remote candidates pending, add them now */
+		GSList *candidates = NULL;
+		NiceCandidate *c = NULL;
+		while((c = g_async_queue_try_pop(handle->queued_candidates)) != NULL) {
+			JANUS_LOG(LOG_VERB, "[%"SCNu64"] Processing candidate %p\n", handle->handle_id, c);
+			candidates = g_slist_append(candidates, c);
+		}
+		guint count = g_slist_length(candidates);
+		if(stream != NULL && component != NULL && count > 0) {
+			int added = nice_agent_set_remote_candidates(handle->agent, stream->stream_id, component->component_id, candidates);
+			if(added < 0 || (guint)added != count) {
+				JANUS_LOG(LOG_WARN, "[%"SCNu64"] Failed to add some remote candidates (added %u, expected %u)\n",
+					handle->handle_id, added, count);
+			} else {
+				JANUS_LOG(LOG_VERB, "[%"SCNu64"] %d remote %s added\n", handle->handle_id,
+					count, (count > 1 ? "candidates" : "candidate"));
+			}
+		}
+		g_slist_free(candidates);
+		return G_SOURCE_CONTINUE;
+	} else if(pkt == &janus_ice_dtls_handshake) {
 		if(!janus_is_webrtc_encryption_enabled()) {
 			JANUS_LOG(LOG_WARN, "[%"SCNu64"] WebRTC encryption disabled, skipping DTLS handshake\n", handle->handle_id);
 			janus_ice_dtls_handshake_done(handle, component);
@@ -4249,10 +4352,13 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 								component->out_stats.audio.updated = now;
 							}
 							component->out_stats.audio.bytes_lastsec_temp += pkt->length;
-							stream->audio_last_ts = timestamp;
+							struct timeval tv;
+							gettimeofday(&tv, NULL);
+							if ((gint32)(timestamp - stream->audio_last_rtp_ts) > 0) {
+								stream->audio_last_ntp_ts = (gint64)tv.tv_sec*G_USEC_PER_SEC + tv.tv_usec;
+								stream->audio_last_rtp_ts = timestamp;
+							}
 							if(stream->audio_first_ntp_ts == 0) {
-								struct timeval tv;
-								gettimeofday(&tv, NULL);
 								stream->audio_first_ntp_ts = (gint64)tv.tv_sec*G_USEC_PER_SEC + tv.tv_usec;
 								stream->audio_first_rtp_ts = timestamp;
 							}
@@ -4277,10 +4383,13 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 								component->out_stats.video[0].updated = now;
 							}
 							component->out_stats.video[0].bytes_lastsec_temp += pkt->length;
-							stream->video_last_ts = timestamp;
+							struct timeval tv;
+							gettimeofday(&tv, NULL);
+							if ((gint32)(timestamp - stream->video_last_rtp_ts) > 0) {
+								stream->video_last_ntp_ts = (gint64)tv.tv_sec*G_USEC_PER_SEC + tv.tv_usec;
+								stream->video_last_rtp_ts = timestamp;
+							}
 							if(stream->video_first_ntp_ts[0] == 0) {
-								struct timeval tv;
-								gettimeofday(&tv, NULL);
 								stream->video_first_ntp_ts[0] = (gint64)tv.tv_sec*G_USEC_PER_SEC + tv.tv_usec;
 								stream->video_first_rtp_ts[0] = timestamp;
 							}
