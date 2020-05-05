@@ -2030,7 +2030,7 @@ function Janus(gatewayCallbacks) {
 				if(config.myStream && config.myStream.getAudioTracks() && config.myStream.getAudioTracks().length) {
 					var s = config.myStream.getAudioTracks()[0];
 					Janus.log("Removing audio track:", s);
-					// config.myStream.removeTrack(s);
+					config.myStream.removeTrack(s);
 					try {
 						at.stop();
 					} catch(e) {}
@@ -2045,7 +2045,7 @@ function Janus(gatewayCallbacks) {
 						for(var s of config.pc.getSenders()) {
 							if(s && s.track && s.track.kind === "audio") {
 								Janus.log("Removing audio sender:", s);
-								// config.pc.removeTrack(s);
+								config.pc.removeTrack(s);
 							}
 						}
 					}
@@ -2055,7 +2055,7 @@ function Janus(gatewayCallbacks) {
 				if(config.myStream && config.myStream.getVideoTracks() && config.myStream.getVideoTracks().length) {
 					var s = config.myStream.getVideoTracks()[0];
 					Janus.log("Removing video track:", s);
-					// config.myStream.removeTrack(s);
+					config.myStream.removeTrack(s);
 					try {
 						vt.stop();
 					} catch(e) {}
