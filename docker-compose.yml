@@ -3,6 +3,6 @@ services:
   ffc_janus_gateway:
     build: .
     container_name: "ffc_janus_gateway"
-    image: "jimber/ffc_janus_gateway-${ENVIRONMENT}:${CI_COMMIT_TAG}"
+    image: "jimber/ffc_janus_gateway-${ENVIRONMENT:-development}:${CI_COMMIT_TAG:-dev}"
     network_mode: "host"
     restart: always
