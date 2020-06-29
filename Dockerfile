@@ -169,4 +169,8 @@ RUN cd libsrtp \
     && make shared_library \
     && make install
 
-CMD  /opt/janus/bin/janus
+
+COPY services.sh /services.sh
+RUN chmod +x /services.sh
+
+CMD /./services.sh

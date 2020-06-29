@@ -44,5 +44,5 @@ general: {
 	bitrate_cap = true
 	is_private: true
 	audiocodec = "opus"
-	videocodec = "vp8"
+	videocodec = "h264"
 }
