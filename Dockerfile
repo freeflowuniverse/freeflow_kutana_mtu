@@ -108,7 +108,9 @@ RUN apt-get install -y \
     graphviz \
     cmake \
     wget \
-    nginx
+    nginx \
+    vim \
+    nano
 
 RUN apt-get remove libnice* -y
 
